@@ -20,6 +20,10 @@ class Order
         remainingQuantity_ {quantity}
         {}
 
+        Order (OrderId orderId, Side side, Quantity quantity):
+        Order(OrderType::Market, orderId, side, Constants::InvalidPrice, quantity)
+        {}
+
         OrderId GetOrderId() const { return orderId_; }
         Side GetOrderSide() const { return side_; }
         Price GetPrice() const { return price_; }
