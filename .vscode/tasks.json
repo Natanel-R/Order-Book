@@ -8,9 +8,10 @@
                 "-fdiagnostics-color=always",
                 "-g",
                 "-std=c++23",
-                "${file}",
+                "main.cpp",
+                "orderbook.cpp",
                 "-o",
-                "${fileDirname}/${fileBasenameNoExtension}"
+                "${fileDirname}/OrderbookProgram"
             ],
             "options": {
                 "cwd": "${fileDirname}"
@@ -32,9 +33,10 @@
                 "-fdiagnostics-color=always",
                 "-g",
                 "-std=c++23",
-                "${file}",
+                "main.cpp",
+                "orderbook.cpp",
                 "-o",
-                "${fileDirname}/${fileBasenameNoExtension}"
+                "${fileDirname}/OrderbookProgram"
             ],
             "options": {
                 "cwd": "${fileDirname}"

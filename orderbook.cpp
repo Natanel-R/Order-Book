@@ -1,4 +1,4 @@
-#include "Orderbook.h"
+#include "OrderBook.h"
 #include <numeric>
 #include <chrono>
 #include <ctime>
@@ -21,7 +21,7 @@
     }
  }
 
- bool Orderbook::canFullyFill(Side side, Price price, Quantity quantity) const
+ bool OrderBook::CanFullyFill(Side side, Price price, Quantity quantity) const
  {
     if (!CanMatch(side, price)) return false;
 
@@ -35,7 +35,7 @@
     else
     {
         const auto [bidPrice, _] = *bids_.begin();
-        threshold = askPrice;
+        threshold = bidPrice;
     }
 
     for (const auto& [levelPrice, levelData] : data_)
@@ -50,7 +50,7 @@
     return false;
  }
 
-void Orderbook::PruneGoodForDay()
+void OrderBook::PruneGoodForDay()
 {
     using namespace std::chrono;
     const auto end = hours(16);
@@ -60,7 +60,7 @@ void Orderbook::PruneGoodForDay()
         const auto now = system_clock::now();
         const auto now_c = system_clock::to_time_t(now);
         std::tm now_parts;
-        localtime_s(&now_parts, &now_c);
+        localtime_r(&now_c, &now_parts);
 
         if (now_parts.tm_hour >= end.count()) now_parts.tm_mday += 1;
 
@@ -83,7 +83,7 @@ void Orderbook::PruneGoodForDay()
         {
             std::scoped_lock ordersLock { ordersMutex_ };
 
-            for (const auto& [_, entry] : orders_)
+            for (const auto& [orderPrice, entry] : orders_)
             {
                 const auto& [order, _] = entry;
                 if (order->GetOrderType() != OrderType::GoodForDay) continue;
@@ -95,9 +95,9 @@ void Orderbook::PruneGoodForDay()
 }
 
 
-Orderbook::OrderBook() : ordersPruneThread_{ [this] {PruneGoodForDayOrders(); }} { }
+OrderBook::OrderBook() : ordersPruneThread_{ [this] {PruneGoodForDay(); }} { }
 
-void Orderbook::CancelOrderInternal(OrderId orderId)
+void OrderBook::CancelOrderInternal(OrderId orderId)
 {
     if (!orders_.contains(orderId)) return;
     const auto& [order, iterator] = orders_.at(orderId);
@@ -120,35 +120,35 @@ void Orderbook::CancelOrderInternal(OrderId orderId)
     OnOrderCancelled(order);
 }
 
-void Orderbook:OnOrderAdded(OrderPointer order)
+void OrderBook::OnOrderAdded(OrderPointer order)
 {
     UpdateLevelData(order->GetPrice(), order->GetRemainingQuantity(), LevelData::Action::Add);
 }
 
-void Orderbook::OnOrderCancelled(OrderPointer order)
+void OrderBook::OnOrderCancelled(OrderPointer order)
 {
     UpdateLevelData(order->GetPrice(), order->GetRemainingQuantity(), LevelData::Action::Remove);
 }
 
-void Orderbook:OnOrderMatched(Price price, Quantity quantity, bool isFullyFilled)
+void OrderBook::OnOrderMatched(Price price, Quantity quantity, bool isFullyFilled)
 {
     UpdateLevelData(price, quantity, isFullyFilled ? LevelData::Action::Remove : LevelData::Action::Match);
 }
 
-void Orderbook::UpdateLevelData(Price price, Quantity quantity, LevelData::Action action)
+void OrderBook::UpdateLevelData(Price price, Quantity quantity, LevelData::Action action)
 {
     auto& data = data_[price];
 
-    data.count_ += action == LevelData::Action::Remove ? -1 : action == LevelData::Action:Add ? 1 : 0;
+    data.count_ += action == LevelData::Action::Remove ? -1 : action == LevelData::Action::Add ? 1 : 0;
     if (action == LevelData::Action::Remove || action == LevelData::Action::Match)
     {
         data.quantity_ -= quantity;
     }
     else
     {
-        data.quantity += quantity;
+        data.quantity_ += quantity;
     }
-    if (data.count == 0) data_erase(price);
+    if (data.count_ == 0) data_.erase(price);
 }
 
 Trades OrderBook::AddOrder(OrderPointer order)
@@ -174,7 +174,7 @@ Trades OrderBook::AddOrder(OrderPointer order)
 
 
     if ((order->GetOrderType() == OrderType::FillAndKill)&& !CanMatch(order->GetOrderSide(), order->GetPrice())) return {};
-    if (order->GetOrderType() == OrderType::FillOrKill && !CanFullyFill(order->GetSide(), order->GetPrice(), order->GetInitialQuantity())) return {};
+    if (order->GetOrderType() == OrderType::FillOrKill && !CanFullyFill(order->GetOrderSide(), order->GetPrice(), order->GetInitialQuantity())) return {};
 
 
     OrderPointers::iterator iterator;
@@ -244,8 +244,8 @@ Trades OrderBook::MatchOrders()
                 TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity}, 
                 TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity}});
 
-            OnOrderMatched(bid->GetPrice(), quantity, bid->IsFilled());
-            OnOrderMatched(ask->GetPrice(), quantity, ask->IsFilled());
+            OnOrderMatched(bid->GetPrice(), quantity, bid->isFilled());
+            OnOrderMatched(ask->GetPrice(), quantity, ask->isFilled());
         }
     }
 
@@ -279,9 +279,9 @@ void OrderBook::CancelOrder(OrderId orderId)
 void OrderBook::CancelOrders(OrderIds orderIds)
 {
     std::scoped_lock ordersLock { ordersMutex_ };
-    for (const auto& order : OrderIds)
+    for (const auto& order : orderIds)
     {
-        Orderbook::CancelOrderInternal(order);
+        OrderBook::CancelOrderInternal(order);
     }
 }
 
@@ -303,3 +303,11 @@ OrderBookLevelInfos OrderBook::GetOrderInfos() const{
 }
 
 std::size_t OrderBook::Size() const { return orders_.size(); }
+
+
+OrderBook::~OrderBook()
+{
+    shutdown_.store(true, std::memory_order_release);
+	shutdownConditionVariable_.notify_one();
+	ordersPruneThread_.join();
+}

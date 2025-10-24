@@ -26,7 +26,7 @@ class OrderBook
         struct LevelData
         {
             Quantity quantity_ {};
-            Quantity count {};
+            Quantity count_ {};
 
             enum class Action
             {
@@ -53,9 +53,10 @@ class OrderBook
         void OnOrderMatched(Price price, Quantity quantity, bool isFullyFilled);
         void UpdateLevelData(Price price, Quantity quantity, LevelData::Action action);
 
-        bool canFullyFill(Side side, Price price, Quantity quantity) const;
+        bool CanFullyFill(Side side, Price price, Quantity quantity) const;
         bool CanMatch(Side side, Price price) const;
         Trades MatchOrders();
+        void PruneGoodForDay();
 
     public:
 
