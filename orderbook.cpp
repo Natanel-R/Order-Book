@@ -100,7 +100,7 @@ OrderBook::OrderBook() : ordersPruneThread_{ [this] {PruneGoodForDay(); }} { }
 void OrderBook::CancelOrderInternal(OrderId orderId)
 {
     if (!orders_.contains(orderId)) return;
-    const auto& [order, iterator] = orders_.at(orderId);
+    const auto [order, iterator] = orders_.at(orderId);
     orders_.erase(orderId);
             
     if (order->GetOrderSide() == Side::Sell)
@@ -198,11 +198,18 @@ Trades OrderBook::AddOrder(OrderPointer order)
 
 Trades OrderBook::ModifyOrder(OrderModify order)
 {
-    if (!orders_.contains(order.GetOrderId())) return {};
+    OrderType orderType;
+    {
+        std::scoped_lock ordersLock { ordersMutex_ };
+        
+        if (!orders_.contains(order.GetOrderId())) return {};
 
-    const auto& [existingOrder, _] = orders_.at(order.GetOrderId());
+        const auto& [existingOrder, _] = orders_.at(order.GetOrderId());
+        orderType = existingOrder->GetOrderType();
+    }
+
     CancelOrder(order.GetOrderId());
-    return AddOrder(order.ToOrderPointer(existingOrder->GetOrderType()));
+    return AddOrder(order.ToOrderPointer(orderType));
 }
 
 Trades OrderBook::MatchOrders()
@@ -237,16 +244,18 @@ Trades OrderBook::MatchOrders()
                 orders_.erase(ask->GetOrderId());
             }
 
-            if (bids.empty()) bids_.erase(bidPrice);
-            if (asks.empty()) asks_.erase(askPrice);
-
             trades.push_back( Trade{ 
                 TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity}, 
                 TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity}});
 
             OnOrderMatched(bid->GetPrice(), quantity, bid->isFilled());
             OnOrderMatched(ask->GetPrice(), quantity, ask->isFilled());
+
         }
+
+        if (bids.empty()) bids_.erase(bidPrice);
+        if (asks.empty()) asks_.erase(askPrice);
+
     }
 
     if (!bids_.empty())
@@ -302,7 +311,11 @@ OrderBookLevelInfos OrderBook::GetOrderInfos() const{
     return OrderBookLevelInfos {bidInfos, askInfos};
 }
 
-std::size_t OrderBook::Size() const { return orders_.size(); }
+std::size_t OrderBook::Size() const 
+{ 
+    std::scoped_lock ordersLock { ordersMutex_ };
+    return orders_.size(); 
+}
 
 
 OrderBook::~OrderBook()
