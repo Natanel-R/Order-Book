@@ -41,8 +41,8 @@
     for (const auto& [levelPrice, levelData] : data_)
     {
         if (threshold.has_value() &&
-            (side == Side::Sell && threshold.value() > levelPrice) ||
-            (side == Side::Buy && threshold.value() < levelPrice)) continue;
+            ((side == Side::Sell && threshold.value() > levelPrice) ||
+            (side == Side::Buy && threshold.value() < levelPrice))) continue;
 
         if (quantity <= levelData.quantity_) return true;
         quantity -= levelData.quantity_;
