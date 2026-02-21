@@ -215,7 +215,6 @@ Trades OrderBook::ModifyOrder(OrderModify order)
 Trades OrderBook::MatchOrders()
 {
     Trades trades;
-    trades.reserve(orders_.size());
     while (true)
     {
         if (bids_.empty() || asks_.empty()) break;

@@ -3,6 +3,7 @@ import struct
 import time
 import random
 import threading
+import sys
 
 def trader_bot(trader_id, num_orders):
     msg_format = '<BQQIIB8s'
@@ -43,4 +44,6 @@ def run_concurrent_test(num_traders=10, orders_per_trader=20000):
     print(f"Throughput: {total_orders / duration:,.0f} orders/sec")
 
 if __name__ == "__main__":
-    run_concurrent_test(50, 4000)
+    NUM_THREADS = int(sys.argv[1]) if len(sys.argv) > 1 else 50
+    ORDERS_PER_THREAD = int(sys.argv[2]) if len(sys.argv) > 2 else 4000
+    run_concurrent_test(NUM_THREADS, ORDERS_PER_THREAD)
