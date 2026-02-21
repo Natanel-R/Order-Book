@@ -2,13 +2,13 @@
 #include <cstdint>
 #pragma pack(push, 1)
 
-enum class  MessageType : uint_8
+enum class  MessageType : uint8_t
 {
     NewOrder = 1,
     CancelOrder = 2
 };
 
-struct newOrderMsg
+struct NewOrderMsg
 {
     MessageType type;
     uint64_t timestamp;
