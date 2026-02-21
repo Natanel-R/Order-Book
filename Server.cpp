@@ -13,7 +13,8 @@ int main()
     {
         boost::asio::io_context io_context;
         tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 8080));
-        std::cout << "Echo server listening on port 8080...\n";
+        std::cout << "Matching Engine Gateway listening on port 8080...\n";
+        uint64_t total_orders_received = 0;
 
         while (true)
         {
@@ -21,29 +22,42 @@ int main()
             acceptor.accept(socket);
             std::cout << "\nA Client connected!\n";
 
-            char data[1024];
-            boost::system::error_code error;
-            size_t length = socket.read_some(boost::asio::buffer(data), error);
-            if (error == boost::asio::stream_errc::eof)
+            while (true)
             {
-                std::cout << "Client closed the connection naturally\n";
-            }
-            else if (error)
-            {
-                throw boost::system::system_error(error);
-            }
-            else
-            {
-                if (length >= sizeof(NewOrderMsg))
+                char data[4096];
+                boost::system::error_code error;
+                size_t length = socket.read_some(boost::asio::buffer(data), error);
+
+                if (error == boost::asio::stream_errc::eof)
                 {
-                    NewOrderMsg* msg = reinterpret_cast<NewOrderMsg*>(data);
-                    if (msg->type == MessageType::NewOrder)
+                    std::cout << "Client closed the connection naturally\n";
+                    break;
+                }
+                else if (error)
+                {
+                    std::cerr << "Network Error: " << error.message() << "\n";
+                    break;
+                }
+                else
+                {
+                    size_t offset = 0;
+                    while (offset + sizeof(NewOrderMsg) <= length)
                     {
-                        std::cout << std::format("Received BUY/SELL for Symbol: {} | Price: {} | Qty: {}\n", msg->symbol, msg->price, msg->quantity);
+                        NewOrderMsg* msg = reinterpret_cast<NewOrderMsg*>(data + offset);
+                        if (msg->type == MessageType::NewOrder)
+                        {
+                            total_orders_received++;
+                            if (total_orders_received % 10000 == 0)
+                            {
+                                std::cout << "Received: " << total_orders_received << " orders so far...\n";
+                            }
+                        }
+                        offset += sizeof(NewOrderMsg);
                     }
                 }
-                boost::asio::write(socket, boost::asio::buffer(data, length));
             }
+
+            
         }
     }
     catch (std::exception& e)
