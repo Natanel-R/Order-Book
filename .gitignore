@@ -42,3 +42,12 @@
 
 #added folders by user (me)
 orderbook
+
+venv/
+engine
+Server
+OrderbookProgram
+*.tmp
+__pycache__/
+*.json
+engine_mode.txt
