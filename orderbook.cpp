@@ -3,7 +3,16 @@
 #include <chrono>
 #include <ctime>
 
-
+void OrderBook::DestroyOrder(OrderPointer order)
+{
+    if (order == nullptr) return;
+    if (useMempool_)
+    {
+        order->~Order();
+        orderPool_.deallocate(order);
+    }
+    else delete order;
+}
 
  bool OrderBook::CanMatch(Side side, Price price) const
  {
@@ -95,7 +104,8 @@ void OrderBook::PruneGoodForDay()
 }
 
 
-OrderBook::OrderBook() : ordersPruneThread_{ [this] {PruneGoodForDay(); }} { }
+OrderBook::OrderBook(MemoryPool<Order>& pool, bool use_mempool) : ordersPruneThread_{ [this] {PruneGoodForDay(); }},
+                    orderPool_(pool), useMempool_(use_mempool) { }
 
 void OrderBook::CancelOrderInternal(OrderId orderId)
 {
@@ -118,6 +128,7 @@ void OrderBook::CancelOrderInternal(OrderId orderId)
         if (orders.empty()) bids_.erase(price);
     }
     OnOrderCancelled(order);
+    DestroyOrder(order);
 }
 
 void OrderBook::OnOrderAdded(OrderPointer order)
@@ -172,22 +183,20 @@ Trades OrderBook::AddOrder(OrderPointer order)
         return {};
     }
 
-
     if ((order->GetOrderType() == OrderType::FillAndKill)&& !CanMatch(order->GetOrderSide(), order->GetPrice())) return {};
     if (order->GetOrderType() == OrderType::FillOrKill && !CanFullyFill(order->GetOrderSide(), order->GetPrice(), order->GetInitialQuantity())) return {};
-
 
     OrderPointers::iterator iterator;
     if (order->GetOrderSide() == Side::Buy){
         auto& orders = bids_[order->GetPrice()];
         orders.push_back(order);
-        iterator = std::next(orders.begin(), orders.size() - 1);
+        iterator = std::prev(orders.end()); 
     }
     else
     {
         auto& orders = asks_[order->GetPrice()];
         orders.push_back(order);
-        iterator = std::next(orders.begin(), orders.size() - 1);
+        iterator = std::prev(orders.end()); 
     }
     orders_.insert({ order->GetOrderId(), OrderEntry{ order, iterator }});
 
@@ -209,7 +218,18 @@ Trades OrderBook::ModifyOrder(OrderModify order)
     }
 
     CancelOrder(order.GetOrderId());
-    return AddOrder(order.ToOrderPointer(orderType));
+    
+    OrderPointer newOrder = nullptr;
+    if (useMempool_)
+    {
+        Order* raw_mem = orderPool_.allocate();
+        if (raw_mem != nullptr) newOrder = new(raw_mem) Order(orderType, order.GetOrderId(), 
+            order.GetSide(), order.GetPrice(), order.GetQuantity());
+    }
+    else newOrder = new Order(orderType, order.GetOrderId(), 
+            order.GetSide(), order.GetPrice(), order.GetQuantity());
+    if (newOrder == nullptr) return {};
+    return AddOrder(newOrder);
 }
 
 Trades OrderBook::MatchOrders()
@@ -232,23 +252,32 @@ Trades OrderBook::MatchOrders()
             bid->Fill(quantity);
             ask->Fill(quantity);
 
-            if (bid->isFilled())
+            bool bidFilled = bid->isFilled();
+            bool askFilled = ask->isFilled();
+            OrderId bidId = bid->GetOrderId();
+            OrderId askId = ask->GetOrderId();
+            Price bidPriceMatch = bid->GetPrice();
+            Price askPriceMatch = ask->GetPrice();
+
+            if (bidFilled) 
             {
                 bids.pop_front();
-                orders_.erase(bid->GetOrderId());
+                orders_.erase(bidId);
             }
-            if (ask->isFilled())
+            if (askFilled) 
             {
                 asks.pop_front();
-                orders_.erase(ask->GetOrderId());
+                orders_.erase(askId);
             }
-
             trades.push_back( Trade{ 
-                TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity}, 
-                TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity}});
+                TradeInfo{bidId, bidPriceMatch, quantity}, 
+                TradeInfo{askId, askPriceMatch, quantity}});
 
-            OnOrderMatched(bid->GetPrice(), quantity, bid->isFilled());
-            OnOrderMatched(ask->GetPrice(), quantity, ask->isFilled());
+            OnOrderMatched(bidPriceMatch, quantity, bidFilled);
+            OnOrderMatched(askPriceMatch, quantity, askFilled);
+
+            if (bidFilled) DestroyOrder(bid);
+            if (askFilled) DestroyOrder(ask);
 
         }
 
@@ -322,4 +351,10 @@ OrderBook::~OrderBook()
     shutdown_.store(true, std::memory_order_release);
 	shutdownConditionVariable_.notify_one();
 	ordersPruneThread_.join();
+
+    for (auto& [id, entry] : orders_)
+    {
+        DestroyOrder(entry.order_);
+    }
+    orders_.clear();
 }
