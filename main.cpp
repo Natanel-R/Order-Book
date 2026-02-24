@@ -11,6 +11,7 @@
 #include "OrderType.h"
 #include <fstream>
 #include <cstdio>
+#include "FixedSizePool.h"
 
 
 void save_book_snapshot(const OrderBook& orderbook) {
@@ -43,12 +44,40 @@ std::atomic<bool> server_running{true};
 std::atomic<uint64_t> network_received_count{0};
 std::atomic<uint64_t> engine_processed_count{0};
 bool use_queue = false; 
+bool use_mempool = false;
+
+
+inline Order* AllocateOrder(MemoryPool<Order>& pool, bool use_pool, OrderId id, uint8_t side, uint64_t price, uint64_t quantity) 
+{
+    if (use_pool)
+    {
+        Order* raw_mem = pool.allocate();
+        if (raw_mem == nullptr) throw std::bad_alloc();
+        return new(raw_mem) Order(OrderType::GoodTillCancel, id, static_cast<Side>(side), 
+        static_cast<Price>(price), static_cast<Quantity>(quantity));
+    }
+    else
+    {
+        return new Order(OrderType::GoodTillCancel, id, static_cast<Side>(side), 
+        static_cast<Price>(price), static_cast<Quantity>(quantity));
+    }
+}
 
 int main()
 {
     try
     {
-        OrderBook orderbook;
+        MemoryPool<Order> order_pool(2000000);
+
+        std::ifstream mode_file("engine_mode.txt");
+        if (mode_file.is_open()) {
+            std::string sync_mode, mem_mode;
+            mode_file >> sync_mode >> mem_mode;
+            use_queue = (mode == "queue");
+            use_mempool = (mem_mode == "mempool");
+        }
+
+        OrderBook orderbook(order_pool, use_mempool);
         std::thread engine_thread([&orderbook]() {
             NewOrderMsg msg;
             
@@ -56,13 +85,7 @@ int main()
             {
                 if (order_queue.pop(msg))
                 {
-                    OrderPointer new_order = std::make_shared<Order>(
-                        OrderType::GoodTillCancel,
-                        msg.order_id,
-                        static_cast<Side>(msg.side),
-                        static_cast<Price>(msg.price),
-                        static_cast<Quantity>(msg.quantity)
-                    );
+                    Order* new_order = AllocateOrder(order_pool, use_mempool, msg.order_id, msg.side, msg.price, msg.quantity);
                     orderbook.AddOrder(new_order);
                     engine_processed_count++;
                     if (engine_processed_count % 10000 == 0)
@@ -113,12 +136,6 @@ int main()
         
         while (server_running)
         {
-            std::ifstream mode_file("engine_mode.txt");
-            if (mode_file.is_open()) {
-                std::string mode;
-                mode_file >> mode;
-                use_queue = (mode == "queue");
-            }
             auto socket = std::make_shared<tcp::socket>(io_context);
             acceptor.accept(*socket);
             std::cout << "\n[NETWORK] Client connected! Spawning new thread...\n";
@@ -148,13 +165,8 @@ int main()
                             } 
                             else 
                             {
-                                OrderPointer new_order = std::make_shared<Order>(
-                                    OrderType::GoodTillCancel,
-                                    msg->order_id,
-                                    static_cast<Side>(msg->side),
-                                    static_cast<Price>(msg->price),
-                                    static_cast<Quantity>(msg->quantity)
-                                );
+                                Order* new_order = AllocateOrder(order_pool, use_mempool, msg->order_id,
+                                     msg->side, msg->price, msg->quantity);
                                 orderbook.AddOrder(new_order); 
                                 if (current_count % 10000 == 0) 
                                 {

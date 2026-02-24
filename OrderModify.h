@@ -15,11 +15,6 @@ class OrderModify
         Price GetPrice() const { return price_; }
         Quantity GetQuantity() const { return quantity_; }
         Side GetSide() const { return side_; }
-        
-        OrderPointer ToOrderPointer(OrderType type) const
-        {
-            return std::make_shared<Order>(type, GetOrderId(), GetSide(), GetPrice(), GetQuantity());
-        }
 
     private:
         OrderId orderId_;

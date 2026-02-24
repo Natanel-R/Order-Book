@@ -6,7 +6,6 @@
 #include "Side.h"
 #include "Usings.h"
 #include "Constants.h"
-#include <memory>
 
 class Order
 {
@@ -58,5 +57,5 @@ class Order
             Quantity remainingQuantity_;
 };
 
-using OrderPointer = std::shared_ptr<Order>;
+using OrderPointer = Order*;
 using OrderPointers = std::list<OrderPointer>;

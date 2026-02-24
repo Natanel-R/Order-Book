@@ -9,6 +9,7 @@
 #include <thread>
 #include <condition_variable>
 #include <mutex>
+#include "FixedSizePool.h"
 
 
 
@@ -44,6 +45,8 @@ class OrderBook
         std::thread ordersPruneThread_;
         std::condition_variable shutdownConditionVariable_;
         std::atomic<bool> shutdown_ { false };
+        MemoryPool<Order>& orderPool_;
+        bool useMempool_;
 
         void CancelOrders(OrderIds orderIds);
         void CancelOrderInternal(OrderId orderId);
@@ -57,10 +60,11 @@ class OrderBook
         bool CanMatch(Side side, Price price) const;
         Trades MatchOrders();
         void PruneGoodForDay();
+        void DestroyOrder(OrderPointer order);
 
     public:
 
-        OrderBook();
+        OrderBook(MemoryPool<Order>& pool, bool use_mempool);
         OrderBook(const OrderBook&) = delete;
         void operator=(const OrderBook&) = delete;
         OrderBook(const OrderBook&&) = delete;
