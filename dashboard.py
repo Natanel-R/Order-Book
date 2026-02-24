@@ -8,10 +8,26 @@ import subprocess
 st.set_page_config(page_title="C++ Matching Engine Profiler", layout="wide")
 st.sidebar.header("🕹️ Simulation Control")
 
-# 1. The Mode Toggle
-mode = st.sidebar.radio("C++ Engine Architecture", ["Lock-Free Queue", "Synchronous Mutex"])
+st.sidebar.header("⚙️ Engine Architecture Toggle")
+
+concurrency_mode = st.sidebar.radio(
+    "Concurrency Model",
+    ("Lock-Free Queue", "Synchronous (Blocking)")
+)
+
+memory_mode = st.sidebar.radio(
+    "Memory Allocator",
+    ("Lock-Free Pool", "OS Heap (Internal Mutex)")
+)
+
+# Translate the button clicks into the exact words C++ is looking for
+c_str = "queue" if concurrency_mode == "Lock-Free Queue" else "sync"
+m_str = "mempool" if memory_mode == "Lock-Free Pool" else "os"
+
 with open("engine_mode.txt", "w") as f:
-    f.write("queue" if mode == "Lock-Free Queue" else "sync")
+    f.write(f"{c_str} {m_str}")
+
+st.sidebar.success("Hardware configuration locked.")
 
 # 2. The Load Parameters
 num_threads = st.sidebar.number_input("Concurrent Clients (Threads)", min_value=1, max_value=500, value=50)

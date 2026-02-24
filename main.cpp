@@ -14,184 +14,96 @@
 #include "FixedSizePool.h"
 
 
-void save_book_snapshot(const OrderBook& orderbook) {
-    auto info = orderbook.GetOrderInfos();
-    std::ofstream f("book_state.json.tmp");
-    const auto& bids = info.GetBids();
-    const auto& asks = info.GetAsks();
-
-    f << "{\"bids\": [";
-    for (size_t i = 0; i < bids.size(); ++i) {
-        f << "{\"price\":" << bids[i].price_ << ",\"quantity\":" << bids[i].quantity_ << "}"
-          << (i == bids.size() - 1 ? "" : ",");
-    }
-    f << "], \"asks\": [";
-    for (size_t i = 0; i < asks.size(); ++i) {
-        f << "{\"price\":" << asks[i].price_ << ",\"quantity\":" << asks[i].quantity_ << "}"
-          << (i == asks.size() - 1 ? "" : ",");
-    }
-    f << "]}";
-    f.close();
-    
-    std::rename("book_state.json.tmp", "book_state.json");
-}
-
-
-
-using boost::asio::ip::tcp;
 boost::lockfree::queue<NewOrderMsg, boost::lockfree::capacity<65000>> order_queue;
 std::atomic<bool> server_running{true};
-std::atomic<uint64_t> network_received_count{0};
 std::atomic<uint64_t> engine_processed_count{0};
 
-
+// Allocation Helper
 inline Order* AllocateOrder(MemoryPool<Order>& pool, bool use_pool, OrderId id, uint8_t side, uint64_t price, uint64_t quantity) 
 {
-    if (use_pool)
-    {
+    if (use_pool) {
         Order* raw_mem = pool.allocate();
         if (raw_mem == nullptr) throw std::bad_alloc();
-        return new(raw_mem) Order(OrderType::GoodTillCancel, id, static_cast<Side>(side), 
-        static_cast<Price>(price), static_cast<Quantity>(quantity));
-    }
-    else
-    {
-        return new Order(OrderType::GoodTillCancel, id, static_cast<Side>(side), 
-        static_cast<Price>(price), static_cast<Quantity>(quantity));
+        return new(raw_mem) Order(OrderType::GoodTillCancel, id, static_cast<Side>(side), static_cast<Price>(price), static_cast<Quantity>(quantity));
+    } else {
+        return new Order(OrderType::GoodTillCancel, id, static_cast<Side>(side), static_cast<Price>(price), static_cast<Quantity>(quantity));
     }
 }
 
 int main()
 {
-    bool use_queue = false; 
-    bool use_mempool = false;
     try
     {
-        MemoryPool<Order> order_pool(2000000);
-
-        std::ifstream mode_file("engine_mode.txt");
-        if (mode_file.is_open()) {
-            std::string sync_mode, mem_mode;
-            mode_file >> sync_mode >> mem_mode;
-            use_queue = (sync_mode == "queue");
-            use_mempool = (mem_mode == "mempool");
-        }
-
-        OrderBook orderbook(order_pool, use_mempool);
-        std::thread engine_thread([&orderbook, &order_pool, use_mempool]() {
-            NewOrderMsg msg;
-            
-            while (server_running)
-            {
-                if (order_queue.pop(msg))
-                {
-                    Order* new_order = AllocateOrder(order_pool, use_mempool, msg.order_id, msg.side, msg.price, msg.quantity);
-                    orderbook.AddOrder(new_order);
-                    engine_processed_count++;
-                    if (engine_processed_count % 10000 == 0)
-                    {
-                        save_book_snapshot(orderbook);
-                    }
-                    if (engine_processed_count % 10000 == 0) 
-                    {
-                        std::cout << "[ENGINE THREAD] Matched " << engine_processed_count << " orders.\n";
-                    }
-                }
-                else 
-                {
-                    std::this_thread::yield(); 
-                }
-            }
-        });
-
-        std::thread metrics_thread([]() {
-        uint64_t last_network_count = 0;
-        uint64_t last_engine_count = 0;
-
-            while (server_running) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                uint64_t current_network = network_received_count.load();
-                uint64_t current_engine = engine_processed_count.load();
-
-                uint64_t network_ops = current_network - last_network_count;
-                uint64_t engine_ops = current_engine - last_engine_count;
-
-                std::ofstream f("metrics.json.tmp");
-                f << "{\"network_ops\": " << network_ops 
-                << ", \"engine_ops\": " << engine_ops 
-                << ", \"total_network\": " << current_network 
-                << ", \"total_engine\": " << current_engine << "}";
-                f.close();
-                std::rename("metrics.json.tmp", "metrics.json");
-
-                last_network_count = current_network;
-                last_engine_count = current_engine;
-            }
-        });
-
-        boost::asio::io_context io_context;
-        tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), 8080));
-        std::cout << "Concurrent Matching Engine Gateway listening on port 8080...\n";
-        std::cout << "Current Mode: " << (use_queue ? "Lock-Free Queue" : "Synchronous") << "\n";
+        std::cout << "--- PHASE 3: MULTITHREADED QUEUE + MEMPOOL ---\n";
         
-        while (server_running)
-        {
-            auto socket = std::make_shared<tcp::socket>(io_context);
-            acceptor.accept(*socket);
-            std::cout << "\n[NETWORK] Client connected! Spawning new thread...\n";
+        bool use_mempool = true; // KEEP THE POOL ON!
+        MemoryPool<Order> order_pool(2000000);
+        OrderBook orderbook(order_pool, use_mempool);
 
-            std::thread client_thread([socket, &orderbook, &order_pool, use_mempool, use_queue]() {
-                char data[65536]; 
-                boost::system::error_code error;
-                
-                while (server_running) 
-                {
-                    size_t length = socket->read_some(boost::asio::buffer(data), error);
-                    if (error) 
-                    {
-                        break; 
-                    } 
-                    
-                    size_t offset = 0;
-                    while (offset + sizeof(NewOrderMsg) <= length)
-                    {
-                        NewOrderMsg* msg = reinterpret_cast<NewOrderMsg*>(data + offset);
-                        if (msg->type == MessageType::NewOrder)
-                        {
-                            uint64_t current_count = ++network_received_count;
-                            if (use_queue) 
-                            {
-                                while (!order_queue.push(*msg)) { std::this_thread::yield(); }
-                            } 
-                            else 
-                            {
-                                Order* new_order = AllocateOrder(order_pool, use_mempool, msg->order_id,
-                                     msg->side, msg->price, msg->quantity);
-                                orderbook.AddOrder(new_order); 
-                                if (current_count % 10000 == 0) 
-                                {
-                                    save_book_snapshot(orderbook);
-                                }
-                                if (current_count % 10000 == 0) 
-                                {
-                                    std::cout << "[NETWORK THREAD] Synchronously matched " << current_count << " orders.\n";
-                                }
-                            }
-                        }
-                        offset += sizeof(NewOrderMsg);
+        // 1. Start the Engine Thread
+        std::thread engine_thread([&orderbook, &order_pool, use_mempool]() {
+            try {
+                NewOrderMsg msg;
+                while (server_running) {
+                    if (order_queue.pop(msg)) {
+                        Order* new_order = AllocateOrder(order_pool, use_mempool, msg.order_id, msg.side, msg.price, msg.quantity);
+                        orderbook.AddOrder(new_order);
+                        engine_processed_count.fetch_add(1, std::memory_order_relaxed);
+                    } else {
+                        std::this_thread::yield(); // Fast hardware yield
                     }
                 }
-            });
-            client_thread.detach(); 
+            } catch (const std::exception& e) {
+                std::cerr << "\n[FATAL] Engine Thread died: " << e.what() << "\n";
+                server_running = false;
+            }
+        });
+
+        // 2. Pre-generate dummy network messages
+        std::vector<NewOrderMsg> dummy_messages(2000000);
+        for (int i = 0; i < 2000000; i++) {
+            dummy_messages[i].type = MessageType::NewOrder;
+            dummy_messages[i].order_id = i;
+            dummy_messages[i].side = (i % 2 == 0) ? static_cast<uint8_t>(Side::Buy) : static_cast<uint8_t>(Side::Sell);
+            dummy_messages[i].price = 100 + (i % 10);
+            dummy_messages[i].quantity = 10;
         }
 
+        std::cout << "Pre-generation complete. Main thread firing into Lock-Free Queue...\n";
+
+        // 3. Start clock and blast the queue
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        for (int i = 0; i < 2000000; i++) {
+            while (!order_queue.push(dummy_messages[i])) { 
+                std::this_thread::yield(); // Spin if the queue hits 65,000 capacity
+            }
+        }
+
+        std::cout << "Push complete. Waiting for Engine Thread to drain the queue...\n";
+
+        // 4. Wait for the engine to finish popping and matching
+        while (engine_processed_count.load(std::memory_order_relaxed) < 2000000) {
+            if (!server_running) break; 
+            std::this_thread::yield();
+        }
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> duration_seconds = end_time - start_time;
+
+        if (server_running) {
+            std::cout << "\nSUCCESS: Processed 2,000,000 orders across threads in " << duration_seconds.count() * 1000.0 << " ms.\n";
+            std::cout << "Multithreaded Throughput: " << (2000000.0 / duration_seconds.count()) << " Ops/Sec\n";
+        }
+
+        // 5. Clean shutdown
         server_running = false;
         engine_thread.join();
-        metrics_thread.join();
     }
-    catch (std::exception& e)
+    catch (const std::exception& e)
     {
-        std::cerr << "Fatal Exception: " << e.what() << "\n";
+        std::cerr << "Fatal Exception in Main: " << e.what() << "\n";
     }
+    
     return 0;
 }
