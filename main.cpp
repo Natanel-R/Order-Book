@@ -43,8 +43,6 @@ boost::lockfree::queue<NewOrderMsg, boost::lockfree::capacity<65000>> order_queu
 std::atomic<bool> server_running{true};
 std::atomic<uint64_t> network_received_count{0};
 std::atomic<uint64_t> engine_processed_count{0};
-bool use_queue = false; 
-bool use_mempool = false;
 
 
 inline Order* AllocateOrder(MemoryPool<Order>& pool, bool use_pool, OrderId id, uint8_t side, uint64_t price, uint64_t quantity) 
@@ -65,6 +63,8 @@ inline Order* AllocateOrder(MemoryPool<Order>& pool, bool use_pool, OrderId id, 
 
 int main()
 {
+    bool use_queue = false; 
+    bool use_mempool = false;
     try
     {
         MemoryPool<Order> order_pool(2000000);
@@ -73,12 +73,12 @@ int main()
         if (mode_file.is_open()) {
             std::string sync_mode, mem_mode;
             mode_file >> sync_mode >> mem_mode;
-            use_queue = (mode == "queue");
+            use_queue = (sync_mode == "queue");
             use_mempool = (mem_mode == "mempool");
         }
 
         OrderBook orderbook(order_pool, use_mempool);
-        std::thread engine_thread([&orderbook]() {
+        std::thread engine_thread([&orderbook, &order_pool, use_mempool]() {
             NewOrderMsg msg;
             
             while (server_running)
@@ -140,7 +140,7 @@ int main()
             acceptor.accept(*socket);
             std::cout << "\n[NETWORK] Client connected! Spawning new thread...\n";
 
-            std::thread client_thread([socket, &orderbook]() {
+            std::thread client_thread([socket, &orderbook, &order_pool, use_mempool, use_queue]() {
                 char data[65536]; 
                 boost::system::error_code error;
                 

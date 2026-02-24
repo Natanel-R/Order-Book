@@ -1,3 +1,4 @@
+#pragma once
 #include <atomic>
 
 
@@ -6,11 +7,7 @@ struct alignas(16) TaggedPointer
 {
     T* ptr;
     uint64_t version;
-    bool operator=(const TaggedPointer& other) const
-    {
-        return ptr == other.ptr && version == other.version;
-    }
-}
+};
 
 
 template <typename T>
@@ -64,7 +61,7 @@ public:
         {
             *new_block = expected.ptr;
         }
-        while (!head_.compare_exchange_weak(expected.ptr, TaggedPointer<T>{memory, expected.version + 1}));
+        while (!head_.compare_exchange_weak(expected, TaggedPointer<T>{memory, expected.version + 1}));
     }
 };
 

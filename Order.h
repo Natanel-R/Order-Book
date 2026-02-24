@@ -18,7 +18,7 @@ class Order
         initialQuantity_ { quantity },
         remainingQuantity_ {quantity}
         {}
-
+        Order() = default;
         Order (OrderId orderId, Side side, Quantity quantity):
         Order(OrderType::Market, orderId, side, Constants::InvalidPrice, quantity)
         {}
