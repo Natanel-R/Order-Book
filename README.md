@@ -1,53 +1,200 @@
-# ⚡ Concurrent Limit Order Book & Real-Time Profiler
+# ⚡ High-Frequency Trading (HFT) Matching Engine & Profiler
 
-A high-performance, multithreaded Limit Order Book (LOB) matching engine written in C++20, complete with a real-time Python/Streamlit telemetry dashboard. 
+An ultra-low latency **C++20 Limit Order Book (LOB)** built for maximum throughput and deterministic performance.
 
-This project serves as an experimental testbed to benchmark the latency and throughput differences between standard Mutex-locked architectures and Lock-Free Single-Producer Single-Consumer (SPSC) queues under heavy concurrent network load.
+This project focuses on eliminating traditional OS bottlenecks through:
 
-![Dashboard Demo](./demo.gif) 
+* Lock-free concurrency
+* Zero-allocation matching
+* Custom memory management
+* Binary wire protocol ingestion
+* Integrated performance benchmarking
 
-## 🚀 Key Features
-* **Binary Network Protocol:** Uses `boost::asio` for asynchronous TCP socket acceptance and reads packed binary `struct` messages to minimize serialization overhead.
-* **Dual Architecture Engine:** Hot-swappable matching engine modes:
-  * *Synchronous Mutex:* Network threads directly compete for a global `std::mutex` to process orders.
-  * *Lock-Free Queue:* Network threads push to a `boost::lockfree::queue` (SPSC), allowing a dedicated Engine Thread to match orders sequentially without blocking network ingestion.
-* **Time-Price Priority:** Implements standard matching logic using standard C++ containers.
-* **Out-of-Band Telemetry:** A dedicated C++ metrics thread safely captures `std::atomic` counters and writes non-blocking JSON snapshots to feed the dashboard.
-* **Live Python Dashboard:** A Streamlit web interface that visualizes Depth of Market (DOM) histograms, live Throughput (OPS), and allows users to trigger concurrent load tests directly from the browser.
+Designed to explore real-world matching engine constraints such as cache coherence, network ingestion pressure, and allocator contention.
 
-## 🛠️ Technology Stack
-* **Backend:** C++20, Boost (Asio, Lockfree), CMake/Make
-* **Frontend/Profiling:** Python 3.12, Streamlit, Pandas
-* **OS:** Linux / WSL (Ubuntu)
+---
 
-## 📈 Engineering Insights & Bottlenecks
-During profiling, the system peaked at **~35,000 Orders Per Second (OPS)**. 
-While the Lock-Free queue successfully eliminated application-level thread contention, profiling revealed that the ultimate bottleneck was the **Operating System Heap Mutex**. Because the standard C++ library containers (`std::map`, `std::list`, `std::make_shared`) dynamically allocate memory on the hot path, the threads eventually contended for the OS allocator lock. Future iterations would replace STL containers with pre-allocated memory pools and flat arrays to achieve true zero-allocation processing.
+## 🚀 Architecture Highlights
 
-## ⚙️ How to Run Locally
+### 🧠 Zero-Allocation Hot Path
 
-### 1. Prerequisites
-Ensure you have `g++` (with C++20 support), `boost`, and `python3-venv` installed.
+Standard heap allocation is replaced with a custom fixed-size memory pool for `Order` objects.
+
+**Result:**
+
+* No allocator contention
+* No global heap lock
+* Deterministic memory reuse
+* True zero allocations during matching
+
+---
+
+### 🔒 Lock-Free Concurrency (SPSC)
+
+A **Single-Producer / Single-Consumer pipeline** decouples:
+
+* Network ingestion
+* Matching engine processing
+
+This prevents burst traffic from stalling the core engine.
+
+**Implementation:**
+
+* Lock-free queue
+* Cache-aware data flow
+* Minimal synchronization overhead
+
+---
+
+### 📦 Binary Wire Protocol (Zero-Copy Parsing)
+
+Orders are transmitted using a compact fixed-size binary struct.
+
+**Benefits:**
+
+* No parsing overhead
+* No serialization cost
+* Direct memory reinterpretation
+* Fully deterministic packet handling
+
+---
+
+### 🧪 Integrated Benchmark Harness
+
+Built-in CLI benchmarking enables **hardware-level throughput testing** without external tooling.
+
+Capable of processing:
+
+> **10 million orders in under 2 seconds** on consumer hardware.
+
+---
+
+## 📊 Performance Benchmarks (Local Hardware)
+
+| Execution Mode | Threading       | Memory      | Throughput       |
+| -------------- | --------------- | ----------- | ---------------- |
+| Benchmark      | Synchronous     | Memory Pool | **~6.2M OPS**    |
+| Benchmark      | Synchronous     | OS Heap     | ~5.0M OPS        |
+| Benchmark      | Lock-Free Queue | Memory Pool | ~3.6M OPS*       |
+| Live Network   | Lock-Free Queue | Memory Pool | ~35K – 60K OPS** |
+
+### Performance Notes
+
+* Queue mode slowdown is caused by cross-core cache coherence traffic
+(MESI protocol, cache line migration, L1/L2 misses).
+
+** Live throughput is currently limited by the Python TCP load generator.
+
+---
+
+## 🛠 Technology Stack
+
+### Engine
+
+* C++20
+* Lock-free data structures
+* Custom memory pools
+* Atomic operations
+
+### Networking
+
+* TCP raw binary protocol
+* Zero-copy message parsing
+* Packet fragmentation handling
+
+### Telemetry / Visualization
+
+* Python 3.12
+* Streamlit dashboard
+* Pandas / NumPy analytics
+
+---
+
+## ⚙️ Build & Run
+
+### 🔧 Compile Engine
+
 ```bash
-sudo apt-get install libboost-all-dev python3-venv
+g++ -std=c++20 -O3 -Wall -Wextra -pthread *.cpp -o engine \
+    -lboost_system -lboost_thread
 ```
 
-### 2. Compile the C++ Engine
-Open your terminal in the project folder and run the build command:
+---
+
+### 🧪 Offline Hardware Benchmark
+
+Measure raw engine throughput without networking overhead.
+
 ```bash
-g++ -std=c++20 -Wall -Wextra -pthread *.cpp -o engine
-./engine
+# Usage:
+# ./engine <mode: live/test> <threading: queue/sync> <memory: mempool/os>
+
+./engine test sync mempool
 ```
 
-### 3. Launch the Dashboard
-Open a second terminal window (leave the engine running in the first one), activate your Python environment, and start the UI:
+---
+
+### 🌐 Live Server Mode
+
+Start matching engine:
+
 ```bash
-source venv/bin/activate
+./engine live queue mempool
+```
+
+Launch monitoring dashboard:
+
+```bash
 streamlit run dashboard.py
 ```
 
-### 4. Run the Simulation
-1. Navigate to the `http://localhost:8501` link provided by Streamlit in your browser.
-2. Use the sidebar controller to select your C++ architecture (Lock-Free Queue vs. Synchronous Mutex).
-3. Adjust the concurrent thread count and order volume.
-4. Click **🚀 LAUNCH LOAD TEST** to blast the C++ engine with orders and watch the Throughput and Depth of Market (DOM) charts update in real-time.
+---
+
+## 📈 Engineering Insights
+
+### The I/O Tax
+
+Initial throughput was limited by disk writes.
+
+Reducing snapshot frequency to once every **250,000 orders**
+eliminated kernel-level blocking and restored linear scaling.
+
+---
+
+### TCP Fragmentation Handling
+
+Incoming packets may arrive split across multiple reads.
+
+A ring-buffer shift strategy ensures:
+
+* Struct alignment is preserved
+* Binary reinterpretation is always safe
+* No partial-packet corruption
+
+---
+
+### Memory Layout Determinism
+
+Explicit packed struct alignment guarantees identical layout across languages.
+
+Result:
+
+* Python sender and C++ receiver share exact binary mapping
+* No padding
+* No transformation
+* True zero-copy communication
+
+---
+
+## 🎯 Project Goals
+
+* Explore real-world matching engine performance constraints
+* Measure allocator and cache coherence impact
+* Demonstrate lock-free pipeline behavior
+* Build reproducible latency and throughput benchmarks
+
+---
+
+## 📜 License
+
+MIT License
