@@ -100,7 +100,7 @@ int main(int argc, char* argv[])
             std::cerr << "========================================\n";
             return 1;
         }
-                
+
         MemoryPool<Order> order_pool(10000000);
         OrderBook orderbook(order_pool, use_mempool);
 
@@ -115,7 +115,6 @@ int main(int argc, char* argv[])
                     {
                         Order* new_order = AllocateOrder(order_pool, use_mempool, msg.order_id, msg.side, msg.price, msg.quantity);
                         orderbook.AddOrder(new_order);
-                        engine_processed_count.fetch_add(1, std::memory_order_relaxed);
                         
                         // Update every 250k processed orders
                         uint64_t prev_count = engine_processed_count.fetch_add(1, std::memory_order_relaxed);
