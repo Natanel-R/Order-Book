@@ -70,28 +70,33 @@ Orders are transmitted using a compact fixed-size binary struct.
 * Zero-copy message parsing
 * Packet fragmentation handling
 
-### Telemetry / Visualization
-* Python 3.12
-* Streamlit dashboard
-* Pandas / NumPy analytics
+### Telemetry & Profiling
+* Linux `perf` & Flamegraphs (Hardware Counters)
+* Python 3.12 (Streamlit dashboard, Pandas, NumPy analytics)
 
 ---
 
 ## ⚙️ Build & Run
 
 ### 🔧 1. Compile the Engine (Out-of-Source Build)
-The project uses CMake to handle system-specific threading and atomic dependencies automatically.
+The project uses CMake with specific build configurations. Use `Release` for maximum throughput, or `RelWithDebInfo` to attach debug symbols and frame pointers for hardware profiling.
+
 ```bash
 mkdir build
 cd build
-cmake ..
+
+# For Maximum Performance (Default)
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# For Hardware Profiling & Flamegraphs
+# cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+
 make
 ```
 
 ### ✅ 2. Run the Unit Tests
 Verify the integrity of the Limit Order Book's matching logic and queue priority before executing benchmarks.
 ```bash
-# From inside the build/ directory:
 ./run_tests
 ```
 
@@ -112,9 +117,21 @@ Launch the monitoring dashboard (from the root directory):
 streamlit run dashboard.py
 ```
 
+### 🔬 5. Hardware Profiling (Linux Only)
+Measure L1 cache loads, branch mispredictions, and IPC using the Linux kernel profiler:
+```bash
+sudo perf stat -d ./engine test sync mempool
+```
+
 ---
 
 ## 📈 Engineering Insights
+
+### Validating the Memory Wall (L1 Cache Coherence)
+Using `perf stat`, hardware registers confirmed the efficiency of the custom `MemoryPool`. During a 10-million order benchmark, the engine executes with a **~1.6% L1 cache miss rate** and an IPC of **1.72**. The CPU pipeline is almost entirely bound by branch misprediction (`tma_bad_speculation` at ~98%) rather than memory fetching, proving the elimination of standard OS heap fragmentation.
+
+### Flamegraph Diagnostics
+Flamegraphs were utilized to identify thread-scheduling bottlenecks. A call stack visualization revealed that an unused `std::thread` spinning via `std::this_thread::yield()` in synchronous mode was triggering excessive OS context switches. Properly scoping the thread spawn logic halved total CPU cycles and restored strictly single-core execution.
 
 ### The I/O Tax
 Initial throughput was limited by disk writes. Reducing snapshot frequency to once every **250,000 orders** eliminated kernel-level blocking and restored linear scaling.
@@ -129,10 +146,10 @@ Explicit packed struct alignment guarantees identical layout across languages. T
 
 ## 🎯 Project Goals
 * Explore real-world matching engine performance constraints
-* Measure allocator and cache coherence impact
+* Measure allocator and cache coherence impact natively on silicon
 * Demonstrate lock-free pipeline behavior
-* Build reproducible latency and throughput benchmarks
 * Mathematically prove market microstructure matching rules
+* Build reproducible latency and throughput benchmarks
 
 ---
 
