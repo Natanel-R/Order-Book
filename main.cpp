@@ -103,38 +103,42 @@ int main(int argc, char* argv[])
 
         MemoryPool<Order> order_pool(10000000);
         OrderBook orderbook(order_pool, use_mempool);
+        std::thread engine_thread;
 
         // Start the Engine Thread
-        std::thread engine_thread([&orderbook, &order_pool, use_mempool]() {
-            try 
-            {
-                NewOrderMsg msg;
-                while (server_running) 
+        if (use_queue)
+        {
+            engine_thread = std::thread([&orderbook, &order_pool, use_mempool]() {
+                try 
                 {
-                    if (order_queue.pop(msg)) 
+                    NewOrderMsg msg;
+                    while (server_running) 
                     {
-                        Order* new_order = AllocateOrder(order_pool, use_mempool, msg.order_id, msg.side, msg.price, msg.quantity);
-                        orderbook.AddOrder(new_order);
-                        
-                        // Update every 250k processed orders
-                        uint64_t prev_count = engine_processed_count.fetch_add(1, std::memory_order_relaxed);
-                        if ((prev_count+1) % 250000 == 0)
+                        if (order_queue.pop(msg)) 
                         {
-                            save_book_snapshot(orderbook);
+                            Order* new_order = AllocateOrder(order_pool, use_mempool, msg.order_id, msg.side, msg.price, msg.quantity);
+                            orderbook.AddOrder(new_order);
+                            
+                            // Update every 250k processed orders
+                            uint64_t prev_count = engine_processed_count.fetch_add(1, std::memory_order_relaxed);
+                            if ((prev_count+1) % 250000 == 0)
+                            {
+                                save_book_snapshot(orderbook);
+                            }
+                        } 
+                        else 
+                        {
+                            std::this_thread::yield();
                         }
-                    } 
-                    else 
-                    {
-                        std::this_thread::yield();
                     }
+                } 
+                catch (const std::exception& e) 
+                {
+                    std::cerr << "\n[FATAL] Engine Thread died: " << e.what() << "\n";
+                    server_running = false;
                 }
-            } 
-            catch (const std::exception& e) 
-            {
-                std::cerr << "\n[FATAL] Engine Thread died: " << e.what() << "\n";
-                server_running = false;
-            }
-        });
+            });
+        }
 
         if (run_live_server)
         {
