@@ -8,7 +8,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -Wextra")
 
 set(SOURCES
     main.cpp
-    Orderbook.cpp
+    orderbook.cpp
 )
 
 # Create the executable first
@@ -39,5 +39,5 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
-add_executable(run_tests test_orderbook.cpp Orderbook.cpp)
+add_executable(run_tests test_orderbook.cpp orderbook.cpp)
 target_link_libraries(run_tests gtest_main Threads::Threads atomic)
