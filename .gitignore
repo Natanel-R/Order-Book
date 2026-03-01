@@ -51,3 +51,4 @@ OrderbookProgram
 __pycache__/
 *.json
 engine_mode.txt
+build/
